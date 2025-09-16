@@ -1,0 +1,198 @@
+import cv2
+import numpy as np
+import glob
+import os
+
+
+def calibrate_stereo_cameras(
+    left_image_folder,
+    right_image_folder,
+    aruco_dict_type,
+    board_squares_x,
+    board_squares_y,
+    square_length,
+    marker_length,
+):
+    """
+    Calibrates a stereo camera pair using a ChArUco board.
+
+    Args:
+        left_image_folder (str): Path to the folder containing left camera images.
+        right_image_folder (str): Path to the folder containing right camera images.
+        aruco_dict_type (str): The ArUco dictionary type (e.g., 'DICT_4X4_50').
+        board_squares_x (int): Number of squares in the X direction of the ChArUco board.
+        board_squares_y (int): Number of squares in the Y direction of the ChArUco board.
+        square_length (float): Length of the ChArUco square in meters.
+        marker_length (float): Length of the ArUco marker in meters.
+
+    Returns:
+        tuple: A tuple containing the stereo calibration results:
+               - mtxL (np.array): Left camera matrix.
+               - distL (np.array): Left camera distortion coefficients.
+               - mtxR (np.array): Right camera matrix.
+               - distR (np.array): Right camera distortion coefficients.
+               - R (np.array): Rotation matrix between the two cameras.
+               - T (np.array): Translation vector between the two cameras.
+               - E (np.array): Essential matrix.
+               - F (np.array): Fundamental matrix.
+    """
+
+    # 1. Define the ArUco dictionary and ChArUco board
+    aruco_dict = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, aruco_dict_type))
+    # board = cv2.aruco.CharucoBoard_create(
+    #     board_squares_x, board_squares_y, square_length, marker_length, aruco_dict
+    # )
+
+    board = cv2.aruco.CharucoBoard(
+        (board_squares_x, board_squares_y), square_length, marker_length, aruco_dict
+    )
+
+    # 2. Get image paths and prepare lists for calibration data
+    print(f"Loading left data from {os.path.join(left_image_folder)}")
+    left_images = sorted(glob.glob(os.path.join(left_image_folder, "*.jpg")))
+    right_images = sorted(glob.glob(os.path.join(right_image_folder, "*.jpg")))
+
+    print(f"Loaded {len(left_images)} images")
+
+    all_charuco_corners_L = []
+    all_charuco_ids_L = []
+    all_charuco_corners_R = []
+    all_charuco_ids_R = []
+
+    image_size = None
+
+    # 3. Detect ChArUco corners in all images
+    print("Detecting ChArUco corners...")
+    for i in range(len(left_images)):
+        if i > 100:
+            break
+        img_L = cv2.imread(left_images[i])
+        img_R = cv2.imread(right_images[i])
+
+        if image_size is None:
+            image_size = img_L.shape[:2]
+
+        corners_L, ids_L, _ = cv2.aruco.detectMarkers(img_L, aruco_dict)
+        corners_R, ids_R, _ = cv2.aruco.detectMarkers(img_R, aruco_dict)
+
+        if ids_L is not None and ids_R is not None:
+            ret_L, charuco_corners_L, charuco_ids_L = (
+                cv2.aruco.interpolateCornersCharuco(corners_L, ids_L, img_L, board)
+            )
+            ret_R, charuco_corners_R, charuco_ids_R = (
+                cv2.aruco.interpolateCornersCharuco(corners_R, ids_R, img_R, board)
+            )
+
+            if ret_L > 8 and ret_R > 8:
+                all_charuco_corners_L.append(charuco_corners_L)
+                all_charuco_ids_L.append(charuco_ids_L)
+                all_charuco_corners_R.append(charuco_corners_R)
+                all_charuco_ids_R.append(charuco_ids_R)
+
+    # 4. Calibrate each camera individually
+    print("Calibrating left camera...")
+    print(len(all_charuco_corners_L))
+    print(len(all_charuco_ids_L))
+    ret_L, mtxL, distL, rvecsL, tvecsL = cv2.aruco.calibrateCameraCharuco(
+        all_charuco_corners_L, all_charuco_ids_L, board, image_size, None, None
+    )
+
+    print("Calibrating right camera...")
+    print(len(all_charuco_corners_R), len(all_charuco_ids_R))
+    ret_R, mtxR, distR, rvecsR, tvecsR = cv2.aruco.calibrateCameraCharuco(
+        all_charuco_corners_R, all_charuco_ids_R, board, image_size, None, None
+    )
+
+    # 5. Calibrate the stereo pair
+    print("Calibrating stereo pair...")
+
+    print(len(all_charuco_corners_L))
+    print(len(all_charuco_ids_R))
+    charuco_obj_points = board.getChessboardCorners()
+    # We must provide object points and image points for the stereoCalibrate function.
+    # The ChArUco board object points are the same for both cameras.
+
+    left_corners_sampled = []
+    right_corners_sampled = []
+    obj_pts = []
+
+    for i in range(len(all_charuco_ids_L)):
+        left_sub_corners = []
+        right_sub_corners = []
+        obj_pts_sub = []
+
+        for j in range(len(all_charuco_ids_L[i])):
+            idx = np.where(all_charuco_ids_R[i] == all_charuco_ids_L[i][j])
+            if idx[0].size == 0:
+                continue
+            left_sub_corners.append(all_charuco_corners_L[i][j])
+            right_sub_corners.append(all_charuco_corners_R[i][idx])
+            obj_pts_sub.append(charuco_obj_points[all_charuco_ids_L[i][j]])
+        if len(left_sub_corners) > 3 and len(right_sub_corners) > 3:
+            obj_pts.append(np.array(obj_pts_sub, dtype=np.float32))
+            left_corners_sampled.append(np.array(left_sub_corners, dtype=np.float32))
+            right_corners_sampled.append(np.array(right_sub_corners, dtype=np.float32))
+
+            # corners_left_decimate.append()
+        else:
+            print("FAILURE")
+            continue
+
+    ret, mtxL, distL, mtxR, distR, R, T, E, F = cv2.stereoCalibrate(
+        obj_pts,
+        left_corners_sampled,
+        right_corners_sampled,
+        mtxL,
+        distL,
+        mtxR,
+        distR,
+        image_size,
+        # criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-5),
+        # flags=cv2.CALIB_FIX_INTRINSIC,
+    )
+
+    print("Stereo Calibration Complete!")
+    return mtxL, distL, mtxR, distR, R, T, E, F
+
+
+if __name__ == "__main__":
+    ###### CHANGE THESE VALUES TO POINT TO YOUR DIRECTORY
+    LEFT_FOLDER = "/home/mitchell/Marinesitu/ws/calibration/example_data/left/"
+    RIGHT_FOLDER = "/home/mitchell/Marinesitu/ws/calibration/example_data/right/"
+    ######
+
+    ##### THESE SHOULD NOT CHANGE #########
+    ARUCO_DICT_TYPE = "DICT_5X5_1000"
+    BOARD_SQUARES_X = 12
+    BOARD_SQUARES_Y = 9
+    SQUARE_LENGTH_M = 0.03  # in meters
+    MARKER_LENGTH_M = 0.022  # in meters
+    #####################################
+
+    mtxL, distL, mtxR, distR, R, T, E, F = calibrate_stereo_cameras(
+        LEFT_FOLDER,
+        RIGHT_FOLDER,
+        ARUCO_DICT_TYPE,
+        BOARD_SQUARES_X,
+        BOARD_SQUARES_Y,
+        SQUARE_LENGTH_M,
+        MARKER_LENGTH_M,
+    )
+
+    print("\n--- Calibration Results ---")
+    print("Left Camera Matrix (mtxL):\n", mtxL)
+    print("Left Distortion Coeffs (distL):\n", distL)
+    print("Right Camera Matrix (mtxR):\n", mtxR)
+    print("Right Distortion Coeffs (distR):\n", distR)
+    print("Rotation Matrix (R):\n", R)
+    print("Translation Vector (T):\n", T)
+    print("Essential Matrix (E):\n", E)
+    print("Fundamental Matrix (F):\n", F)
+
+    # Requested function 1: Draw the charuco points for the left and right camera. Output to local folder
+
+    # Requested function 2: Draw the matched stereo points. Save to local folder.
+
+    # Requested function 3: Find the position of the left camera using "estimatePoseCharucoBoard" (https://docs.opencv.org/4.12.0/d9/d6a/group__aruco.html#ga21b51b9e8c6422a4bac27e48fa0a150b)
+
+    # Requested function 4: Draw the position of left and right camera and save that data locally or display from function
