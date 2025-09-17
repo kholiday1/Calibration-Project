@@ -157,8 +157,8 @@ def calibrate_stereo_cameras(
 
 if __name__ == "__main__":
     ###### CHANGE THESE VALUES TO POINT TO YOUR DIRECTORY
-    LEFT_FOLDER = "/home/mitchell/Marinesitu/ws/calibration/example_data/left/"
-    RIGHT_FOLDER = "/home/mitchell/Marinesitu/ws/calibration/example_data/right/"
+    LEFT_FOLDER = "/Users/khalilholiday/Downloads/Calibration_left/"
+    RIGHT_FOLDER = "/Users/khalilholiday/Downloads/Calibration_right/"
     ######
 
     ##### THESE SHOULD NOT CHANGE #########
