@@ -290,6 +290,140 @@ def draw_charuco_points(
 
     # Requested function 2: Draw the matched stereo points. Save to local folder.
 
+    def _charuco_board_from_params(aruco_dict_type, squares_x, squares_y, square_len_m, marker_len_m):
+        aruco_dict = getattr(cv2.aruco, aruco_dict_type)
+        dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
+        board = cv2.aruco.CharucoBoard_create(
+            squares_x, squares_y,
+            square_len_m, marker_len_m,
+            dictionary
+        )
+        return dictionary, board
+
+    def _detect_charuco_points(img_bgr, dictionary, board):
+        """Return (charuco_corners Nx2 float32, charuco_ids Nx1 int) or (None, None) if not enough points."""
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        params = cv2.aruco.DetectorParameters_create()
+        # Detect aruco markers
+        corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
+        if ids is None or len(ids) == 0:
+            return None, None
+
+        try:
+            # OpenCV versions differ; ignore if refine is missing
+            cv2.aruco.refineDetectedMarkers(
+                image=gray, board=board,
+                detectedCorners=corners, detectedIds=ids,
+                rejectedCorners=None
+            )
+        except Exception:
+            pass
+
+        # Interpolate charuco corners (subpixel)
+        ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(
+            markerCorners=corners, markerIds=ids, image=gray, board=board
+        )
+        if ret is None or ch_corners is None or ch_ids is None or len(ch_ids) == 0:
+            return None, None
+
+        # Flatten to (N,2) and (N,1)
+        ch_corners = ch_corners.reshape(-1, 2).astype(np.float32)
+        return ch_corners, ch_ids.astype(np.int32)
+
+    def _match_charuco_by_id(ptsL, idsL, ptsR, idsR):
+        """
+        Given per-image charuco corners + ids for left and right, align by shared IDs.
+        Returns (matched_ptsL Nx2, matched_ptsR Nx2). If no overlap, returns (None, None).
+        """
+        if ptsL is None or ptsR is None or idsL is None or idsR is None:
+            return None, None
+
+        # Build id -> index maps
+        mapL = {int(i[0]): idx for idx, i in enumerate(idsL)}
+        mapR = {int(i[0]): idx for idx, i in enumerate(idsR)}
+        shared = sorted(set(mapL.keys()) & set(mapR.keys()))
+        if len(shared) == 0:
+            return None, None
+
+        mL = np.array([ptsL[mapL[k]] for k in shared], dtype=np.float32)
+        mR = np.array([ptsR[mapR[k]] for k in shared], dtype=np.float32)
+        return mL, mR
+
+    def _list_images(folder):
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+        files = []
+        for e in exts:
+            files.extend(glob.glob(os.path.join(folder, f"*{e}")))
+        files.sort()
+        return files
+
+    # -------------- After your calibrate_stereo_cameras(...) call above --------------
+    # Build board/dictionary once for detection
+    dictionary, board = _charuco_board_from_params(
+        ARUCO_DICT_TYPE, BOARD_SQUARES_X, BOARD_SQUARES_Y,
+        SQUARE_LENGTH_M, MARKER_LENGTH_M
+    )
+
+    # List and align the left/right image files by sorted order (assumes pairs align by sort)
+    left_image_paths  = _list_images(LEFT_FOLDER)
+    right_image_paths = _list_images(RIGHT_FOLDER)
+    num_pairs = min(len(left_image_paths), len(right_image_paths))
+
+    # Where to save visuals
+    OUT_DIR = os.path.join(LEFT_FOLDER, "..", "matched_viz")
+    if not os.path.exists(OUT_DIR):
+        os.makedirs(OUT_DIR)
+
+    # If you want epilines, set this True (uses your F from calibration)
+    USE_EPILINES = True if F is not None else False
+
+    saved = 0
+    for i in range(num_pairs):
+        L_path = left_image_paths[i]
+        R_path = right_image_paths[i]
+
+        L_img = cv2.imread(L_path, cv2.IMREAD_COLOR)
+        R_img = cv2.imread(R_path, cv2.IMREAD_COLOR)
+        if L_img is None or R_img is None:
+            continue
+
+        # Detect Charuco points independently in each image
+        ptsL, idsL = _detect_charuco_points(L_img, dictionary, board)
+        ptsR, idsR = _detect_charuco_points(R_img, dictionary, board)
+
+        # Match by shared Charuco IDs
+        mL, mR = _match_charuco_by_id(ptsL, idsL, ptsR, idsR)
+        if mL is None or mR is None or len(mL) < 6:
+            # Skip pairs with too few matches to visualize meaningfully
+            continue
+
+        # Save side-by-side visualization (with optional epipolar lines)
+        out_name = os.path.splitext(os.path.basename(L_path))[0] + "_matched.png"
+        out_path = draw_matched_stereo_points(
+            left_img_path=L_path,
+            right_img_path=R_path,
+            pts_left=mL,
+            pts_right=mR,
+            out_dir=OUT_DIR,
+            filename=out_name,
+            max_points=300,                # reduce clutter if many points
+            draw_indices=False,
+            draw_connections=True,
+            show_epilines=USE_EPILINES,
+            F=F if USE_EPILINES else None,
+            point_radius=4,
+            thickness=2,
+            gap_px=8,
+        )
+        print("Saved:", out_path)
+        saved += 1
+
+    if saved == 0:
+        print("No matched stereo visualizations were saved (not enough overlapping Charuco IDs found).")
+    else:
+        print(f"Saved {saved} matched stereo visualizations to: {OUT_DIR}")
+
+
     # Requested function 3: Find the position of the left camera using "estimatePoseCharucoBoard" (https://docs.opencv.org/4.12.0/d9/d6a/group__aruco.html#ga21b51b9e8c6422a4bac27e48fa0a150b)
 
     # Requested function 4: Draw the position of left and right camera and save that data locally or display from function
