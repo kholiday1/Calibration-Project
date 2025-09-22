@@ -189,7 +189,104 @@ if __name__ == "__main__":
     print("Essential Matrix (E):\n", E)
     print("Fundamental Matrix (F):\n", F)
 
-    # Requested function 1: Draw the charuco points for the left and right camera. Output to local folder
+ # Requested function 1: Draw the charuco points for the left and right camera. Output to local folder
+
+def draw_charuco_points(
+    left_image_folder,
+    right_image_folder,
+    aruco_dict_type,
+    board_squares_x,
+    board_squares_y,
+    square_length,
+    marker_length,
+    output_dir="charuco_outputs"
+):
+    """
+    Draw the detected ArUco markers and ChArUco corners for each left/right image
+    and save annotated images to a local folder (without changing your calibration code).
+
+    Args:
+        left_image_folder (str): Path to left images.
+        right_image_folder (str): Path to right images.
+        aruco_dict_type (str): e.g., 'DICT_5X5_1000'.
+        board_squares_x (int): ChArUco board squares in X.
+        board_squares_y (int): ChArUco board squares in Y.
+        square_length (float): Square size in meters.
+        marker_length (float): Marker size in meters.
+        output_dir (str): Folder to save outputs (created if missing).
+
+    Returns:
+        dict: Summary with counts and output paths.
+    """
+    # Set up dictionary & board 
+    aruco_dict = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, aruco_dict_type))
+    board = cv2.aruco.CharucoBoard(
+        (board_squares_x, board_squares_y), square_length, marker_length, aruco_dict
+    )
+
+    # Make output folders
+    os.makedirs(output_dir, exist_ok=True)
+    left_out = os.path.join(output_dir, "left")
+    right_out = os.path.join(output_dir, "right")
+    os.makedirs(left_out, exist_ok=True)
+    os.makedirs(right_out, exist_ok=True)
+
+    # Gather images 
+    def list_images(folder):
+        exts = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
+        files = []
+        for e in exts:
+            files.extend(glob.glob(os.path.join(folder, e)))
+        return sorted(files)
+
+    left_images = list_images(left_image_folder)
+    right_images = list_images(right_image_folder)
+
+    if len(left_images) == 0 or len(right_images) == 0:
+        print("No images found in one or both folders.")
+        return {"left_saved": 0, "right_saved": 0, "output_dir": output_dir}
+
+    n = min(len(left_images), len(right_images))
+    saved_left = 0
+    saved_right = 0
+
+    def annotate_and_save(img_path, save_dir, side_tag):
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"Warning: could not read {img_path}")
+            return False
+
+        # Detect ArUco markers
+        corners, ids, _ = cv2.aruco.detectMarkers(img, aruco_dict)
+        vis = img.copy()
+        if ids is not None and len(ids) > 0:
+            cv2.aruco.drawDetectedMarkers(vis, corners, ids)
+
+            # Interpolate ChArUco corners
+            ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(
+                corners, ids, img, board
+            )
+            # Draw ChArUco corners if available
+            if ch_corners is not None and ch_ids is not None and len(ch_ids) > 0:
+                try:
+                    cv2.aruco.drawDetectedCornersCharuco(vis, ch_corners, ch_ids)
+                except TypeError:
+                    # Some OpenCV builds omit the ids parameter
+                    cv2.aruco.drawDetectedCornersCharuco(vis, ch_corners)
+
+        fname = os.path.splitext(os.path.basename(img_path))[0]
+        out_path = os.path.join(save_dir, f"{fname}_{side_tag}_charuco.jpg")
+        cv2.imwrite(out_path, vis)
+        return True
+
+    for i in range(n):
+        if annotate_and_save(left_images[i], left_out, "left"):
+            saved_left += 1
+        if annotate_and_save(right_images[i], right_out, "right"):
+            saved_right += 1
+
+    print(f"Saved {saved_left} left and {saved_right} right annotated images to '{output_dir}'.")
+    return {"left_saved": saved_left, "right_saved": saved_right, "output_dir": output_dir}
 
     # Requested function 2: Draw the matched stereo points. Save to local folder.
 
