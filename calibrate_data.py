@@ -357,24 +357,22 @@ def draw_charuco_points(
         files.sort()
         return files
 
-    # -------------- After your calibrate_stereo_cameras(...) call above --------------
     # Build board/dictionary once for detection
     dictionary, board = _charuco_board_from_params(
         ARUCO_DICT_TYPE, BOARD_SQUARES_X, BOARD_SQUARES_Y,
         SQUARE_LENGTH_M, MARKER_LENGTH_M
     )
 
-    # List and align the left/right image files by sorted order (assumes pairs align by sort)
+    # List and align the left/right image files by sorted order 
     left_image_paths  = _list_images(LEFT_FOLDER)
     right_image_paths = _list_images(RIGHT_FOLDER)
     num_pairs = min(len(left_image_paths), len(right_image_paths))
 
-    # Where to save visuals
+
     OUT_DIR = os.path.join(LEFT_FOLDER, "..", "matched_viz")
     if not os.path.exists(OUT_DIR):
         os.makedirs(OUT_DIR)
 
-    # If you want epilines, set this True (uses your F from calibration)
     USE_EPILINES = True if F is not None else False
 
     saved = 0
@@ -394,10 +392,9 @@ def draw_charuco_points(
         # Match by shared Charuco IDs
         mL, mR = _match_charuco_by_id(ptsL, idsL, ptsR, idsR)
         if mL is None or mR is None or len(mL) < 6:
-            # Skip pairs with too few matches to visualize meaningfully
             continue
 
-        # Save side-by-side visualization (with optional epipolar lines)
+        # Save side-by-side visualization 
         out_name = os.path.splitext(os.path.basename(L_path))[0] + "_matched.png"
         out_path = draw_matched_stereo_points(
             left_img_path=L_path,
@@ -406,7 +403,7 @@ def draw_charuco_points(
             pts_right=mR,
             out_dir=OUT_DIR,
             filename=out_name,
-            max_points=300,                # reduce clutter if many points
+            max_points=300,               
             draw_indices=False,
             draw_connections=True,
             show_epilines=USE_EPILINES,
