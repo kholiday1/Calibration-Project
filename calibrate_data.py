@@ -218,20 +218,20 @@ def draw_charuco_points(
     Returns:
         dict: Summary with counts and output paths.
     """
-    # Set up dictionary & board 
+     
     aruco_dict = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, aruco_dict_type))
     board = cv2.aruco.CharucoBoard(
         (board_squares_x, board_squares_y), square_length, marker_length, aruco_dict
     )
 
-    # Make output folders
+    
     os.makedirs(output_dir, exist_ok=True)
     left_out = os.path.join(output_dir, "left")
     right_out = os.path.join(output_dir, "right")
     os.makedirs(left_out, exist_ok=True)
     os.makedirs(right_out, exist_ok=True)
 
-    # Gather images 
+     
     def list_images(folder):
         exts = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
         files = []
@@ -256,22 +256,22 @@ def draw_charuco_points(
             print(f"Warning: could not read {img_path}")
             return False
 
-        # Detect ArUco markers
+        
         corners, ids, _ = cv2.aruco.detectMarkers(img, aruco_dict)
         vis = img.copy()
         if ids is not None and len(ids) > 0:
             cv2.aruco.drawDetectedMarkers(vis, corners, ids)
 
-            # Interpolate ChArUco corners
+            
             ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(
                 corners, ids, img, board
             )
-            # Draw ChArUco corners if available
+            
             if ch_corners is not None and ch_ids is not None and len(ch_ids) > 0:
                 try:
                     cv2.aruco.drawDetectedCornersCharuco(vis, ch_corners, ch_ids)
                 except TypeError:
-                    # Some OpenCV builds omit the ids parameter
+                    
                     cv2.aruco.drawDetectedCornersCharuco(vis, ch_corners)
 
         fname = os.path.splitext(os.path.basename(img_path))[0]
@@ -288,7 +288,7 @@ def draw_charuco_points(
     print(f"Saved {saved_left} left and {saved_right} right annotated images to '{output_dir}'.")
     return {"left_saved": saved_left, "right_saved": saved_right, "output_dir": output_dir}
 
-    # Requested function 2: Draw the matched stereo points. Save to local folder.
+    
 
     def _charuco_board_from_params(aruco_dict_type, squares_x, squares_y, square_len_m, marker_len_m):
         aruco_dict = getattr(cv2.aruco, aruco_dict_type)
@@ -304,13 +304,12 @@ def draw_charuco_points(
         """Return (charuco_corners Nx2 float32, charuco_ids Nx1 int) or (None, None) if not enough points."""
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         params = cv2.aruco.DetectorParameters_create()
-        # Detect aruco markers
         corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
         if ids is None or len(ids) == 0:
             return None, None
 
         try:
-            # OpenCV versions differ; ignore if refine is missing
+            
             cv2.aruco.refineDetectedMarkers(
                 image=gray, board=board,
                 detectedCorners=corners, detectedIds=ids,
@@ -319,14 +318,14 @@ def draw_charuco_points(
         except Exception:
             pass
 
-        # Interpolate charuco corners (subpixel)
+        
         ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(
             markerCorners=corners, markerIds=ids, image=gray, board=board
         )
         if ret is None or ch_corners is None or ch_ids is None or len(ch_ids) == 0:
             return None, None
 
-        # Flatten to (N,2) and (N,1)
+        
         ch_corners = ch_corners.reshape(-1, 2).astype(np.float32)
         return ch_corners, ch_ids.astype(np.int32)
 
@@ -338,7 +337,7 @@ def draw_charuco_points(
         if ptsL is None or ptsR is None or idsL is None or idsR is None:
             return None, None
 
-        # Build id -> index maps
+        
         mapL = {int(i[0]): idx for idx, i in enumerate(idsL)}
         mapR = {int(i[0]): idx for idx, i in enumerate(idsR)}
         shared = sorted(set(mapL.keys()) & set(mapR.keys()))
@@ -356,7 +355,7 @@ def draw_charuco_points(
             files.extend(glob.glob(os.path.join(folder, f"*{e}")))
         files.sort()
         return files
-
+    
     # Build board/dictionary once for detection
     dictionary, board = _charuco_board_from_params(
         ARUCO_DICT_TYPE, BOARD_SQUARES_X, BOARD_SQUARES_Y,
@@ -373,6 +372,8 @@ def draw_charuco_points(
     if not os.path.exists(OUT_DIR):
         os.makedirs(OUT_DIR)
 
+
+
     USE_EPILINES = True if F is not None else False
 
     saved = 0
@@ -385,16 +386,16 @@ def draw_charuco_points(
         if L_img is None or R_img is None:
             continue
 
-        # Detect Charuco points independently in each image
+        
         ptsL, idsL = _detect_charuco_points(L_img, dictionary, board)
         ptsR, idsR = _detect_charuco_points(R_img, dictionary, board)
 
-        # Match by shared Charuco IDs
+        
         mL, mR = _match_charuco_by_id(ptsL, idsL, ptsR, idsR)
         if mL is None or mR is None or len(mL) < 6:
             continue
 
-        # Save side-by-side visualization 
+         
         out_name = os.path.splitext(os.path.basename(L_path))[0] + "_matched.png"
         out_path = draw_matched_stereo_points(
             left_img_path=L_path,
