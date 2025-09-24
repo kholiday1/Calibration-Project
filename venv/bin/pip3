@@ -1,4 +1,4 @@
-#!/Users/khalilholiday/calibration-development/venv/bin/python3.11
+#!/Users/khalilholiday/calibration-development/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

@@ -424,4 +424,92 @@ def draw_charuco_points(
 
     # Requested function 3: Find the position of the left camera using "estimatePoseCharucoBoard" (https://docs.opencv.org/4.12.0/d9/d6a/group__aruco.html#ga21b51b9e8c6422a4bac27e48fa0a150b)
 
+def estimate_left_camera_pose_from_image(img_bgr, mtxL, distL, dictionary, board):
+    pts, ids = _detect_charuco_points(img_bgr, dictionary, board)
+    if pts is None or ids is None or len(ids) < 4:
+        return None
+    ok, rvec, tvec = cv2.aruco.estimatePoseCharucoBoard(
+        pts.reshape(-1, 1, 2), ids, board, mtxL, distL, None, None
+    )
+    if not ok:
+        return None
+    R, _ = cv2.Rodrigues(rvec)
+    cam_pos = (-R.T @ tvec).reshape(3)
+    return rvec, tvec, R, cam_pos
+
+def draw_left_pose_axes(img_bgr, mtxL, distL, rvec, tvec, axis_len):
+    out = img_bgr.copy()
+    try:
+        cv2.drawFrameAxes(out, mtxL, distL, rvec, tvec, axis_len)
+    except AttributeError:
+        cv2.aruco.drawAxis(out, mtxL, distL, rvec, tvec, axis_len)
+    return out
+
+def _charuco_board_from_params(aruco_dict_type, squares_x, squares_y, square_len_m, marker_len_m):
+    aruco_dict = getattr(cv2.aruco, aruco_dict_type)
+    dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict)
+    try:
+        board = cv2.aruco.CharucoBoard_create(squares_x, squares_y, square_len_m, marker_len_m, dictionary)
+    except AttributeError:
+        if hasattr(cv2.aruco, "CharucoBoard") and hasattr(cv2.aruco.CharucoBoard, "create"):
+            board = cv2.aruco.CharucoBoard.create(squares_x, squares_y, square_len_m, marker_len_m, dictionary)
+        else:
+            raise RuntimeError("This OpenCV build lacks ChArUco. Install opencv-contrib-python in your active env.")
+    return dictionary, board
+
+def _detect_charuco_points(img_bgr, dictionary, board):
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    params = cv2.aruco.DetectorParameters_create()
+    corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
+    if ids is None or len(ids) == 0:
+        return None, None
+    try:
+        cv2.aruco.refineDetectedMarkers(image=gray, board=board, detectedCorners=corners, detectedIds=ids, rejectedCorners=None)
+    except Exception:
+        pass
+    ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(markerCorners=corners, markerIds=ids, image=gray, board=board)
+    if ret is None or ch_corners is None or ch_ids is None or len(ch_ids) == 0:
+        return None, None
+    ch_corners = ch_corners.reshape(-1, 2).astype(np.float32)
+    return ch_corners, ch_ids.astype(np.int32)
+
+def _list_images(folder):
+    exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+    files = []
+    for e in exts:
+        files.extend(glob.glob(os.path.join(folder, f"*{e}")))
+    files.sort()
+    return files
+
+dictionary, board = _charuco_board_from_params(
+    ARUCO_DICT_TYPE, BOARD_SQUARES_X, BOARD_SQUARES_Y, SQUARE_LENGTH_M, MARKER_LENGTH_M
+)
+left_image_paths = _list_images(LEFT_FOLDER)
+OUT_DIR = os.path.join(LEFT_FOLDER, "..", "left_pose_viz")
+if not os.path.exists(OUT_DIR):
+    os.makedirs(OUT_DIR)
+
+saved = 0
+for L_path in left_image_paths:
+    L_img = cv2.imread(L_path, cv2.IMREAD_COLOR)
+    if L_img is None:
+        continue
+    res = estimate_left_camera_pose_from_image(L_img, mtxL, distL, dictionary, board)
+    if res is None:
+        continue
+    rvec, tvec, R_left, cam_pos = res
+    print(os.path.basename(L_path), cam_pos.tolist())
+    axis_len = SQUARE_LENGTH_M * 2.0
+    vis = draw_left_pose_axes(L_img, mtxL, distL, rvec, tvec, axis_len)
+    out_name = os.path.splitext(os.path.basename(L_path))[0] + "_axes.png"
+    cv2.imwrite(os.path.join(OUT_DIR, out_name), vis)
+    saved += 1
+
+if saved == 0:
+    print("No poses estimated for left images.")
+else:
+    print(f"Saved {saved} left-camera pose visualizations to: {OUT_DIR}")
+
+
+
     # Requested function 4: Draw the position of left and right camera and save that data locally or display from function
