@@ -448,7 +448,6 @@ def draw_left_pose_axes(img_bgr, mtxL, distL, rvec, tvec, axis_len):
 def _detect_charuco_points(img_bgr, dictionary, board):
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     
-    # FIX: Use the modern constructor
     params = cv2.aruco.DetectorParameters() 
     
     corners, ids, _ = cv2.aruco.detectMarkers(gray, dictionary, parameters=params)
@@ -456,44 +455,33 @@ def _detect_charuco_points(img_bgr, dictionary, board):
     if ids is None or len(ids) == 0:
         return None, None
     
-    # Optional: Refinement is often not necessary if interpolateCornersCharuco is used,
-    # but keeping it for robustness doesn't hurt.
     try:
         cv2.aruco.refineDetectedMarkers(image=gray, board=board, detectedCorners=corners, detectedIds=ids, rejectedCorners=None)
     except Exception:
         pass
     
-    # Note: In modern OpenCV, interpolateCornersCharuco can be slow without K and D, 
-    # but your main pose function handles passing the images that have K and D.
     ret, ch_corners, ch_ids = cv2.aruco.interpolateCornersCharuco(markerCorners=corners, markerIds=ids, image=gray, board=board)
     
     if ret is None or ch_corners is None or ch_ids is None or len(ch_ids) == 0:
         return None, None
     
     ch_corners = ch_corners.reshape(-1, 2).astype(np.float32)
-    # The IDs need to be a simple 1D array of integers
     ch_ids = ch_ids.flatten().astype(np.int32) 
     
     return ch_corners, ch_ids
 
 def _charuco_board_from_params(aruco_dict_type, squares_x, squares_y, square_len_m, marker_len_m):
-    # Use the attribute to get the dictionary constant (e.g., cv2.aruco.DICT_6X6_250)
     aruco_dict_id = getattr(cv2.aruco, aruco_dict_type)
     dictionary = cv2.aruco.getPredefinedDictionary(aruco_dict_id)
-
-    # MODERN METHOD: Simply use the class constructor
     try:
-        # Note: The size tuple is (X, Y)
         board = cv2.aruco.CharucoBoard((squares_x, squares_y), square_len_m, marker_len_m, dictionary)
     except AttributeError:
-        # Fallback to older factory methods, which your original code covered well
         try:
             board = cv2.aruco.CharucoBoard_create(squares_x, squares_y, square_len_m, marker_len_m, dictionary)
         except AttributeError:
             try:
                 board = cv2.aruco.CharucoBoard.create(squares_x, squares_y, square_len_m, marker_len_m, dictionary)
             except AttributeError:
-                 # This is the point where the error message should be triggered if all else fails
                  raise RuntimeError("OpenCV's Charuco API is incompatible or missing. Ensure you have 'opencv-contrib-python' installed.")
 
     return dictionary, board
