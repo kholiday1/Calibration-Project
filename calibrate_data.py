@@ -526,3 +526,102 @@ else:
 
 
     # Requested function 4: Draw the position of left and right camera and save that data locally or display from function
+
+def draw_camera_positions(left_positions, right_positions=None, out_dir=None, filename_prefix="camera_positions_topdown", show=False, save_csv=True, image_size=1024):
+    def _normalize(seq, label):
+        items = []
+        if seq is None:
+            return items
+        for i, it in enumerate(seq):
+            if isinstance(it, (list, tuple)) and len(it) == 2 and hasattr(it[1], "__len__"):
+                name, p = it[0], np.asarray(it[1], dtype=float).reshape(3)
+            else:
+                name, p = f"{label}_{i:04d}", np.asarray(it, dtype=float).reshape(3)
+            items.append((name, p))
+        return items
+
+    L = _normalize(left_positions, "L")
+    R = _normalize(right_positions, "R") if right_positions is not None else []
+    if not L and not R:
+        return {}
+
+    if out_dir is None:
+        out_dir = os.getcwd()
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+    png_path = os.path.join(out_dir, f"{filename_prefix}.png")
+    csv_path = os.path.join(out_dir, f"{filename_prefix}.csv") if save_csv else None
+
+    canvas = np.full((image_size, image_size, 3), 255, np.uint8)
+    margin = 60
+    xs, zs = [], []
+    for _, p in L:
+        xs.append(float(p[0])); zs.append(float(p[2]))
+    for _, p in R:
+        xs.append(float(p[0])); zs.append(float(p[2]))
+    if not xs:
+        return {}
+
+    minx, maxx = min(xs), max(xs)
+    minz, maxz = min(zs), max(zs)
+    if maxx - minx < 1e-6:
+        maxx = minx + 0.2
+    if maxz - minz < 1e-6:
+        maxz = minz + 0.2
+    W, H = canvas.shape[1], canvas.shape[0]
+    sx = (W - 2 * margin) / (maxx - minx)
+    sz = (H - 2 * margin) / (maxz - minz)
+
+    def _to_px(x, z):
+        px = int(margin + (x - minx) * sx)
+        py = int(H - margin - (z - minz) * sz)
+        return px, py
+
+    cv2.rectangle(canvas, (margin, margin), (W - margin, H - margin), (220, 220, 220), 1)
+    if minx <= 0 <= maxx:
+        x0a, y0a = _to_px(0, minz); x0b, y0b = _to_px(0, maxz)
+        cv2.line(canvas, (x0a, y0a), (x0b, y0b), (200, 200, 200), 1)
+    if minz <= 0 <= maxz:
+        xa, ya = _to_px(minx, 0); xb, yb = _to_px(maxx, 0)
+        cv2.line(canvas, (xa, ya), (xb, yb), (200, 200, 200), 1)
+
+    cv2.putText(canvas, "Top-down (X vs Z)", (margin, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (10, 10, 10), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "X (m)", (W // 2, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "Z (m)", (10, H // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1, cv2.LINE_AA)
+
+    for name, p in L:
+        x, z = float(p[0]), float(p[2])
+        px, py = _to_px(x, z)
+        cv2.circle(canvas, (px, py), 5, (60, 120, 255), -1)
+        cv2.putText(canvas, name, (px + 6, py - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (50, 50, 50), 1, cv2.LINE_AA)
+
+    for name, p in R:
+        x, z = float(p[0]), float(p[2])
+        px, py = _to_px(x, z)
+        cv2.circle(canvas, (px, py), 5, (60, 180, 75), -1)
+        cv2.putText(canvas, name, (px + 6, py - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (50, 50, 50), 1, cv2.LINE_AA)
+
+    cv2.circle(canvas, (margin, 54), 6, (60, 120, 255), -1)
+    cv2.putText(canvas, "Left", (margin + 14, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (10, 10, 10), 1, cv2.LINE_AA)
+    cv2.circle(canvas, (margin + 80, 54), 6, (60, 180, 75), -1)
+    cv2.putText(canvas, "Right", (margin + 94, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (10, 10, 10), 1, cv2.LINE_AA)
+
+    cv2.imwrite(png_path, canvas)
+
+    if save_csv:
+        with open(csv_path, "w") as f:
+            f.write("label,side,x_m,y_m,z_m\n")
+            for name, p in L:
+                f.write(f"{name},L,{float(p[0])},{float(p[1])},{float(p[2])}\n")
+            for name, p in R:
+                f.write(f"{name},R,{float(p[0])},{float(p[1])},{float(p[2])}\n")
+
+    if show:
+        try:
+            cv2.imshow("camera_positions", canvas)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        except:
+            pass
+
+    return {"png_path": png_path, "csv_path": csv_path if save_csv else None, "count_left": len(L), "count_right": len(R)}
